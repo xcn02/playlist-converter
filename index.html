@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Harmony → Metrolist Converter</title>
+<style>
+body { font-family: Arial; background:#f2f2f2; padding:30px; text-align:center; }
+#dropZone {
+    border:2px dashed #999;
+    padding:40px;
+    background:white;
+    cursor:pointer;
+}
+button {
+    padding:10px 15px;
+    margin:10px;
+    cursor:pointer;
+}
+input[type="text"] {
+    padding:8px;
+    width:250px;
+}
+.hidden { display:none; }
+</style>
+</head>
+<body>
+
+<h2>Convertisseur Harmony → Metrolist</h2>
+
+<div id="dropZone">
+Glissez votre fichier JSON ici<br>ou cliquez pour sélectionner
+<input type="file" id="fileInput" accept=".json" class="hidden">
+</div>
+
+<br>
+
+<div id="controls" class="hidden">
+Playlist détectée :<br><br>
+<input type="text" id="playlistName">
+<br><br>
+<button onclick="downloadCSV()">Télécharger CSV</button>
+<button onclick="downloadM3U()">Télécharger M3U</button>
+</div>
+
+<script>
+let playlistData = null;
+
+const dropZone = document.getElementById("dropZone");
+const fileInput = document.getElementById("fileInput");
+const controls = document.getElementById("controls");
+const playlistNameInput = document.getElementById("playlistName");
+
+dropZone.addEventListener("click", () => fileInput.click());
+
+dropZone.addEventListener("dragover", e => {
+    e.preventDefault();
+    dropZone.style.background = "#e6f7ff";
+});
+
+dropZone.addEventListener("dragleave", () => {
+    dropZone.style.background = "white";
+});
+
+dropZone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropZone.style.background = "white";
+    handleFile(e.dataTransfer.files[0]);
+});
+
+fileInput.addEventListener("change", e => {
+    handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        playlistData = JSON.parse(e.target.result);
+        const detectedName = playlistData?.playlistInfo?.title || "playlist_export";
+        playlistNameInput.value = sanitizeFileName(detectedName);
+        controls.classList.remove("hidden");
+    };
+    reader.readAsText(file);
+}
+
+function sanitizeFileName(name) {
+    return name.replace(/[\\/:*?"<>|]/g, "").trim();
+}
+
+function getSongs() {
+    return playlistData?.songs || [];
+}
+
+function cleanArtists(artists) {
+    return (artists || [])
+        .map(a => a.name)
+        .filter(name => name && name.toLowerCase() !== "song")
+        .join(" & ");
+}
+
+function downloadCSV() {
+    const songs = getSongs();
+    let csv = "Title,Artist,Album,Duration,YouTubeURL\n";
+
+    songs.forEach(song => {
+        const title = song.title || "";
+        const artist = cleanArtists(song.artists);
+        const album = song.album?.name || "";
+        const duration = song.duration || "";
+        const videoId = song.videoId || "";
+        const url = videoId ? `https://www.youtube.com/watch?v=${videoId}` : "";
+
+        csv += `"${title}","${artist}","${album}","${duration}","${url}"\n`;
+    });
+
+    downloadFile(csv, playlistNameInput.value + ".csv", "text/csv");
+}
+
+function downloadM3U() {
+    const songs = getSongs();
+    let m3u = "#EXTM3U\n";
+    m3u += "#PLAYLIST:" + playlistNameInput.value + "\n";
+
+    songs.forEach(song => {
+        const title = song.title || "";
+        const artist = cleanArtists(song.artists);
+        const duration = song.duration || 0;
+        const videoId = song.videoId || "";
+        const url = videoId ? `https://www.youtube.com/watch?v=${videoId}` : "";
+
+        m3u += `#EXTINF:${duration},${artist} - ${title}\n`;
+        m3u += url + "\n";
+    });
+
+    downloadFile(m3u, playlistNameInput.value + ".m3u", "audio/x-mpegurl");
+}
+
+function downloadFile(content, filename, type) {
+    const blob = new Blob([content], { type: type });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+}
+</script>
+
+</body>
+</html>
