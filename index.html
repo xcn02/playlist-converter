@@ -1,150 +1,188 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<title>Harmony → Metrolist Converter</title>
-<style>
-body { font-family: Arial; background:#f2f2f2; padding:30px; text-align:center; }
-#dropZone {
-    border:2px dashed #999;
-    padding:40px;
-    background:white;
-    cursor:pointer;
-}
-button {
-    padding:10px 15px;
-    margin:10px;
-    cursor:pointer;
-}
-input[type="text"] {
-    padding:8px;
-    width:250px;
-}
-.hidden { display:none; }
-</style>
+    <meta charset="UTF-8">
+    <title>Music Converter Pro</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background:#f0f2f5; padding:20px; color: #333; }
+        .container { max-width: 1000px; margin: auto; display: flex; gap: 20px; flex-wrap: wrap; }
+        .card { background: white; border-radius: 12px; padding: 20px; flex: 1; min-width: 300px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        h2 { color: #1a73e8; font-size: 1.4em; margin-bottom: 20px; }
+        
+        .dropZone { 
+            border: 2px dashed #bdc3c7; padding: 40px 20px; background: #fafafa; 
+            cursor: pointer; border-radius: 8px; transition: 0.3s; margin-bottom: 15px;
+        }
+        .dropZone:hover { border-color: #1a73e8; background: #f1f7fe; }
+        
+        button { 
+            padding: 10px 18px; margin: 5px; cursor: pointer; background: #1a73e8; 
+            color: white; border: none; border-radius: 6px; font-weight: 500;
+        }
+        button:hover { background: #1557b0; }
+        input[type="text"] { padding: 8px; width: 80%; border: 1px solid #ddd; border-radius: 4px; margin: 10px 0; }
+        .hidden { display: none; }
+        .status { font-size: 0.9em; margin-top: 10px; font-weight: bold; }
+        .footer-info { margin-top: 10px; font-size: 0.8em; color: #666; }
+    </style>
 </head>
 <body>
 
-<h2>Convertisseur Harmony JSON → M3U/CSV pour Metrolist</h2>
+<h1 style="text-align:center;">🔄 Music Playlist Bridge</h1>
 
-<div id="dropZone">
-Glissez votre fichier JSON ici<br>ou cliquez pour sélectionner
-<input type="file" id="fileInput" accept=".json" class="hidden">
-</div>
+<div class="container">
+    
+    <div class="card">
+        <h2>Exportation</h2>
+        <p>Harmony (.json) ou OuterTune (.backup)<br><b>VERS</b> M3U / CSV</p>
+        <div id="dropExport" class="dropZone">Glissez votre JSON ou BACKUP ici</div>
+        <input type="file" id="fileExport" class="hidden" accept=".json,.backup">
+        
+        <div id="ctrlExport" class="hidden">
+            <input type="text" id="nameExport" placeholder="Nom du fichier">
+            <br>
+            <button onclick="downloadFile(currentData.csv, 'csv')">Télécharger CSV</button>
+            <button onclick="downloadFile(currentData.m3u, 'm3u')">Télécharger M3U</button>
+        </div>
+        <div id="statusExport" class="status"></div>
+    </div>
 
-<br>
+    <div class="card">
+        <h2>Importation</h2>
+        <p>CSV ou M3U<br><b>VERS</b> Harmony JSON</p>
+        <div id="dropImport" class="dropZone">Glissez votre CSV ou M3U ici</div>
+        <input type="file" id="fileImport" class="hidden" accept=".csv,.m3u">
+        
+        <div id="ctrlImport" class="hidden">
+            <input type="text" id="nameImport" placeholder="Nom de la playlist">
+            <br>
+            <button onclick="downloadFile(currentData.json, 'json')">Générer Harmony JSON</button>
+        </div>
+        <div id="statusImport" class="status"></div>
+    </div>
 
-<div id="controls" class="hidden">
-Playlist détectée :<br><br>
-<input type="text" id="playlistName">
-<br><br>
-<button onclick="downloadCSV()">Télécharger CSV</button>
-<button onclick="downloadM3U()">Télécharger M3U</button>
 </div>
 
 <script>
-let playlistData = null;
+let currentData = { csv: "", m3u: "", json: "" };
+const sqlConfig = { locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` };
 
-const dropZone = document.getElementById("dropZone");
-const fileInput = document.getElementById("fileInput");
-const controls = document.getElementById("controls");
-const playlistNameInput = document.getElementById("playlistName");
+// Setup des zones de drop
+setupZone("dropExport", "fileExport", handleExport);
+setupZone("dropImport", "fileImport", handleImport);
 
-dropZone.addEventListener("click", () => fileInput.click());
+function setupZone(zoneId, inputId, handler) {
+    const zone = document.getElementById(zoneId);
+    const input = document.getElementById(inputId);
+    zone.onclick = () => input.click();
+    zone.ondragover = (e) => { e.preventDefault(); zone.style.borderColor = "#1a73e8"; };
+    zone.ondragleave = () => { zone.style.borderColor = "#bdc3c7"; };
+    zone.ondrop = (e) => { e.preventDefault(); zone.style.borderColor = "#bdc3c7"; handler(e.dataTransfer.files[0]); };
+    input.onchange = (e) => handler(e.target.files[0]);
+}
 
-dropZone.addEventListener("dragover", e => {
-    e.preventDefault();
-    dropZone.style.background = "#e6f7ff";
-});
+// --- LOGIQUE EXPORT (OuterTune/Harmony -> M3U/CSV) ---
+async function handleExport(file) {
+    if (!file) return;
+    const status = document.getElementById("statusExport");
+    status.innerText = "⏳ Traitement...";
+    
+    try {
+        let songs = [];
+        if (file.name.endsWith(".backup")) {
+            songs = await processOuterTune(file);
+        } else {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            songs = (data.songs || []).map(s => ({
+                title: s.title,
+                artist: (s.artists || []).map(a => a.name).join(" & "),
+                album: s.album?.name || "",
+                duration: s.duration || 0,
+                url: s.videoId ? `https://www.youtube.com/watch?v=${s.videoId}` : ""
+            }));
+        }
 
-dropZone.addEventListener("dragleave", () => {
-    dropZone.style.background = "white";
-});
+        currentData.csv = "Title,Artist,Album,Duration,YouTubeURL\n" + songs.map(s => `"${s.title}","${s.artist}","${s.album}","${s.duration}","${s.url}"`).join("\n");
+        currentData.m3u = "#EXTM3U\n" + songs.map(s => `#EXTINF:${s.duration},${s.artist} - ${s.title}\n${s.url}`).join("\n");
+        
+        document.getElementById("nameExport").value = file.name.split('.')[0];
+        document.getElementById("ctrlExport").classList.remove("hidden");
+        status.innerText = `✅ ${songs.length} titres prêts.`;
+    } catch (e) {
+        status.innerText = "❌ Erreur : " + e.message;
+    }
+}
 
-dropZone.addEventListener("drop", e => {
-    e.preventDefault();
-    dropZone.style.background = "white";
-    handleFile(e.dataTransfer.files[0]);
-});
+async function processOuterTune(file) {
+    const zip = await JSZip.loadAsync(file);
+    const dbData = await zip.file("song.db").async("uint8array");
+    const SQL = await initSqlJs(sqlConfig);
+    const db = new SQL.Database(dbData);
+    const res = db.exec("SELECT s.title, GROUP_CONCAT(a.name, ' & '), s.albumName, s.duration, s.id FROM song s LEFT JOIN song_artist_map sam ON s.id = sam.songId LEFT JOIN artist a ON sam.artistId = a.id WHERE s.liked = 1 GROUP BY s.id");
+    
+    return res.length ? res[0].values.map(r => ({ title: r[0], artist: r[1], album: r[2], duration: r[3], url: r[4] ? `https://www.youtube.com/watch?v=${r[4]}` : "" })) : [];
+}
 
-fileInput.addEventListener("change", e => {
-    handleFile(e.target.files[0]);
-});
+// --- LOGIQUE IMPORT (CSV/M3U -> JSON) ---
+async function handleImport(file) {
+    if (!file) return;
+    const status = document.getElementById("statusImport");
+    const text = await file.text();
+    let songs = [];
 
-function handleFile(file) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        playlistData = JSON.parse(e.target.result);
-        const detectedName = playlistData?.playlistInfo?.title || "playlist_export";
-        playlistNameInput.value = sanitizeFileName(detectedName);
-        controls.classList.remove("hidden");
+    try {
+        if (file.name.endsWith(".csv")) {
+            const lines = text.split("\n").slice(1);
+            songs = lines.filter(l => l.trim()).map(line => {
+                const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, ''));
+                return createSongObj(c[0], c[1], c[2], c[3], c[4]);
+            });
+        } else if (file.name.endsWith(".m3u")) {
+            const lines = text.split("\n");
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith("#EXTINF:")) {
+                    const info = lines[i].split(",")[1];
+                    const [artist, title] = info.includes(" - ") ? info.split(" - ") : ["Inconnu", info];
+                    const url = lines[i+1]?.startsWith("http") ? lines[i+1] : "";
+                    songs.push(createSongObj(title.trim(), artist.trim(), "", 0, url));
+                }
+            }
+        }
+
+        currentData.json = JSON.stringify({ playlistInfo: { title: file.name.split('.')[0] }, songs: songs }, null, 2);
+        document.getElementById("nameImport").value = file.name.split('.')[0] + "_harmony";
+        document.getElementById("ctrlImport").classList.remove("hidden");
+        status.innerText = `✅ ${songs.length} titres convertis en JSON.`;
+    } catch (e) {
+        status.innerText = "❌ Erreur de lecture.";
+    }
+}
+
+function createSongObj(title, artist, album, duration, url) {
+    const vId = url.includes("v=") ? url.split("v=")[1].split("&")[0] : "";
+    return {
+        title: title,
+        artists: [{ name: artist }],
+        album: { name: album },
+        duration: parseInt(duration) || 0,
+        videoId: vId
     };
-    reader.readAsText(file);
 }
 
-function sanitizeFileName(name) {
-    return name.replace(/[\\/:*?"<>|]/g, "").trim();
-}
-
-function getSongs() {
-    return playlistData?.songs || [];
-}
-
-function cleanArtists(artists) {
-    return (artists || [])
-        .map(a => a.name)
-        .filter(name => name && name.toLowerCase() !== "song")
-        .join(" & ");
-}
-
-function downloadCSV() {
-    const songs = getSongs();
-    let csv = "Title,Artist,Album,Duration,YouTubeURL\n";
-
-    songs.forEach(song => {
-        const title = song.title || "";
-        const artist = cleanArtists(song.artists);
-        const album = song.album?.name || "";
-        const duration = song.duration || "";
-        const videoId = song.videoId || "";
-        const url = videoId ? `https://www.youtube.com/watch?v=${videoId}` : "";
-
-        csv += `"${title}","${artist}","${album}","${duration}","${url}"\n`;
-    });
-
-    downloadFile(csv, playlistNameInput.value + ".csv", "text/csv");
-}
-
-function downloadM3U() {
-    const songs = getSongs();
-    let m3u = "#EXTM3U\n";
-    m3u += "#PLAYLIST:" + playlistNameInput.value + "\n";
-
-    songs.forEach(song => {
-        const title = song.title || "";
-        const artist = cleanArtists(song.artists);
-        const duration = song.duration || 0;
-        const videoId = song.videoId || "";
-        const url = videoId ? `https://www.youtube.com/watch?v=${videoId}` : "";
-
-        m3u += `#EXTINF:${duration},${artist} - ${title}\n`;
-        m3u += url + "\n";
-    });
-
-    downloadFile(m3u, playlistNameInput.value + ".m3u", "audio/x-mpegurl");
-}
-
-function downloadFile(content, filename, type) {
-    const blob = new Blob([content], { type: type });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
+function downloadFile(content, ext) {
+    const name = (ext === 'json' ? document.getElementById("nameImport").value : document.getElementById("nameExport").value) || "playlist";
+    const blob = new Blob([content], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}.${ext}`;
+    a.click();
 }
 </script>
-
 <div id="exportLinks">
-    <h3>Sites pour transferts en services :</h3>
+    <h3>Transfert entre sites streaming (Spotify, Deezer, YoutubeMusic ..) :</h3>
     <a href="https://www.tunemymusic.com/" target="_blank">
         <button>TuneMyMusic</button>
     </a>
@@ -156,7 +194,5 @@ function downloadFile(content, filename, type) {
     </a>
 </div>
 
-
-    
 </body>
 </html>
