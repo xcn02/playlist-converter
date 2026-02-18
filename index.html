@@ -83,17 +83,19 @@ function setupZone(zoneId, inputId, handler) {
     input.onchange = (e) => handler(e.target.files[0]);
 }
 
-// --- LOGIQUE EXPORT (OuterTune/Harmony -> M3U/CSV) ---
+
+// --- LOGIQUE EXPORT  ---
 async function handleExport(file) {
     if (!file) return;
     const status = document.getElementById("statusExport");
-    status.innerText = "⏳ Traitement...";
-    
+    status.innerText = "⏳ Analyse du backup...";
+   
     try {
         let songs = [];
         if (file.name.endsWith(".backup")) {
-            songs = await processOuterTune(file);
-        } else {
+            // Support universel pour OuterTune et MetroList
+            songs = await processSqliteBackup(file);
+        } else if (file.name.endsWith(".json")) {
             const text = await file.text();
             const data = JSON.parse(text);
             songs = (data.songs || []).map(s => ({
@@ -105,6 +107,50 @@ async function handleExport(file) {
             }));
         }
 
+        currentData.csv = "Title,Artist,Album,Duration,YouTubeURL\n" + songs.map(s => `"${s.title}","${s.artist}","${s.album}","${s.duration}","${s.url}"`).join("\n");
+        currentData.m3u = "#EXTM3U\n" + songs.map(s => `#EXTINF:${s.duration},${s.artist} - ${s.title}\n${s.url}`).join("\n");
+       
+        document.getElementById("nameExport").value = file.name.split('.')[0];
+        document.getElementById("ctrlExport").classList.remove("hidden");
+        status.innerText = `✅ ${songs.length} titres extraits avec succès.`;
+    } catch (e) {
+        console.error(e);
+        status.innerText = "❌ Erreur : " + e.message;
+    }
+}
+
+async function processSqliteBackup(file) {
+    const zip = await JSZip.loadAsync(file);
+    const dbFile = zip.file("song.db");
+   
+    if (!dbFile) throw new Error("Fichier song.db introuvable dans le backup.");
+   
+    const dbData = await dbFile.async("uint8array");
+    const SQL = await initSqlJs(sqlConfig);
+    const db = new SQL.Database(dbData);
+   
+    // Requête compatible MetroList & OuterTune (récupère les titres likés)
+    const query = `
+        SELECT s.title,
+               (SELECT GROUP_CONCAT(a.name, ' & ') FROM artist a
+                JOIN song_artist_map sam ON a.id = sam.artistId
+                WHERE sam.songId = s.id) as artists,
+               s.albumName, s.duration, s.id
+        FROM song s
+        WHERE s.liked = 1
+    `;
+   
+    const res = db.exec(query);
+    if (!res.length) return [];
+   
+    return res[0].values.map(r => ({
+        title: r[0],
+        artist: r[1] || "Artiste inconnu",
+        album: r[2] || "Album inconnu",
+        duration: r[3] || 0,
+        url: r[4] ? `https://www.youtube.com/watch?v=${r[4]}` : ""
+    }));
+}
         currentData.csv = "Title,Artist,Album,Duration,YouTubeURL\n" + songs.map(s => `"${s.title}","${s.artist}","${s.album}","${s.duration}","${s.url}"`).join("\n");
         currentData.m3u = "#EXTM3U\n" + songs.map(s => `#EXTINF:${s.duration},${s.artist} - ${s.title}\n${s.url}`).join("\n");
         
@@ -196,3 +242,4 @@ function downloadFile(content, ext) {
 
 </body>
 </html>
+
