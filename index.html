@@ -151,16 +151,6 @@ async function processSqliteBackup(file) {
         url: r[4] ? `https://www.youtube.com/watch?v=${r[4]}` : ""
     }));
 }
-        currentData.csv = "Title,Artist,Album,Duration,YouTubeURL\n" + songs.map(s => `"${s.title}","${s.artist}","${s.album}","${s.duration}","${s.url}"`).join("\n");
-        currentData.m3u = "#EXTM3U\n" + songs.map(s => `#EXTINF:${s.duration},${s.artist} - ${s.title}\n${s.url}`).join("\n");
-        
-        document.getElementById("nameExport").value = file.name.split('.')[0];
-        document.getElementById("ctrlExport").classList.remove("hidden");
-        status.innerText = `✅ ${songs.length} titres prêts.`;
-    } catch (e) {
-        status.innerText = "❌ Erreur : " + e.message;
-    }
-}
 
 async function processOuterTune(file) {
     const zip = await JSZip.loadAsync(file);
@@ -242,5 +232,6 @@ function downloadFile(content, ext) {
 
 </body>
 </html>
+
 
 
