@@ -123,8 +123,13 @@ function displayPlaylists(playlists) {
 // Récupérer chansons d'une playlist
 function getSongsFromPlaylist(db, playlistId) {
     if (playlistId === "liked") {
+        // Liked songs
         const res = db.exec(`
-            SELECT s.title, GROUP_CONCAT(a.name,' & ') AS artists, s.albumName, s.duration, s.id
+            SELECT s.title,
+                   GROUP_CONCAT(a.name,' & ') AS artists,
+                   s.albumName,
+                   s.duration,
+                   s.id
             FROM song s
             LEFT JOIN song_artist_map sam ON s.id = sam.songId
             LEFT JOIN artist a ON sam.artistId = a.id
@@ -133,20 +138,24 @@ function getSongsFromPlaylist(db, playlistId) {
         `);
         return formatSongs(res);
     } else {
+        // Playlist normale
+        // On met l'ID entre guillemets pour compatibilité SQLite TEXT ou INT
         const res = db.exec(`
-            SELECT s.title, GROUP_CONCAT(a.name,' & ') AS artists, s.albumName, s.duration, s.id
+            SELECT s.title,
+                   GROUP_CONCAT(a.name,' & ') AS artists,
+                   s.albumName,
+                   s.duration,
+                   s.id
             FROM song s
             JOIN playlist_song_map psm ON s.id = psm.songId
-            JOIN playlist pl ON pl.id = psm.playlistId
+            JOIN playlist pl ON pl.id = '${playlistId}'
             LEFT JOIN song_artist_map sam ON s.id = sam.songId
             LEFT JOIN artist a ON sam.artistId = a.id
-            WHERE pl.id=${playlistId}
             GROUP BY s.id
         `);
         return formatSongs(res);
     }
 }
-
 function formatSongs(res) {
     if (!res.length) return [];
     return res[0].values.map(r => ({
@@ -161,18 +170,35 @@ function formatSongs(res) {
 function exportSelectedPlaylists() {
     if (!backupData) return;
     const checkboxes = document.querySelectorAll("#playlistList input[type=checkbox]");
+    const exportedNames = [];
+
     checkboxes.forEach(cb => {
         if (cb.checked) {
+            const playlistName = cb.nextSibling.textContent.trim();
             const songs = getSongsFromPlaylist(backupData.db, cb.value);
+
+            if (songs.length === 0) return; // Ignorer si aucune chanson
+
             const csv = buildCSV(songs);
             const m3u = buildM3U(songs);
+
             currentData.csv[cb.value] = csv;
             currentData.m3u[cb.value] = m3u;
-            downloadBlob(csv, `${cb.nextSibling.textContent.trim()}.csv`);
-            downloadBlob(m3u, `${cb.nextSibling.textContent.trim()}.m3u`);
+
+            // Télécharger les fichiers
+            downloadBlob(csv, `${playlistName}.csv`);
+            downloadBlob(m3u, `${playlistName}.m3u`);
+
+            exportedNames.push(playlistName);
         }
     });
-    document.getElementById("statusExport").innerText = "✅ Export terminé pour les playlists sélectionnées.";
+
+    if (exportedNames.length > 0) {
+        document.getElementById("statusExport").innerText =
+            `✅ Export terminé pour les playlists : ${exportedNames.join(", ")}`;
+    } else {
+        document.getElementById("statusExport").innerText = "⚠️ Aucune chanson à exporter pour les playlists sélectionnées.";
+    }
 }
 
 function buildCSV(songs) {
@@ -246,3 +272,4 @@ function downloadFile(content, ext){
 
 </body>
 </html>
+
