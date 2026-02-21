@@ -264,13 +264,10 @@ function buildM3U(songs) {
 
 function downloadBlob(content, filename) {
 
-    let mimeType = "text/plain";
+    let mimeType = "application/octet-stream";
 
     if (filename.endsWith(".csv")) {
         mimeType = "text/csv";
-    } 
-    else if (filename.endsWith(".m3u")) {
-        mimeType = "audio/x-mpegurl";
     } 
     else if (filename.endsWith(".json")) {
         mimeType = "application/json";
@@ -281,7 +278,10 @@ function downloadBlob(content, filename) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = filename;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
 }
 // ---------------- IMPORT ----------------
 async function handleImport(file) {
@@ -347,6 +347,7 @@ function downloadFile(content, ext){
 </div>
 </body>
 </html>
+
 
 
 
